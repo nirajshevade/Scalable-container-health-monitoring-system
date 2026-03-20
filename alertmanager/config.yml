@@ -1,0 +1,205 @@
+# ============================================================
+# Alertmanager Configuration
+# Routes: Critical → PagerDuty + Slack, Warning → Slack, Info → Email
+# ============================================================
+
+global:
+  # How long to wait before sending a notification again
+  resolve_timeout: 5m
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: 'alerts@monitoring.local'
+  smtp_auth_username: ''
+  smtp_auth_password: ''
+  smtp_require_tls: true
+  slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+  http_config:
+    follow_redirects: true
+
+# ─── Alert Templates ─────────────────────────────────────
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# ─── Routing Tree ────────────────────────────────────────
+route:
+  # Default receiver for unmatched alerts
+  receiver: 'slack-default'
+  group_by: ['alertname', 'cluster', 'service', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    # Critical alerts → immediate PagerDuty + Slack notification
+    - matchers:
+        - severity = "critical"
+      receiver: 'critical-alerts'
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 1h
+      continue: true
+
+    # Availability alerts (container down, etc.)
+    - matchers:
+        - category = "availability"
+      receiver: 'availability-alerts'
+      group_wait: 15s
+      group_interval: 2m
+      repeat_interval: 30m
+      continue: false
+
+    # Performance/resource alerts
+    - matchers:
+        - category = "performance"
+      receiver: 'performance-alerts'
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 4h
+
+    # Streaming/Kafka alerts
+    - matchers:
+        - category = "streaming"
+      receiver: 'infrastructure-alerts'
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 2h
+
+    # Logging/ELK alerts
+    - matchers:
+        - category = "logging"
+      receiver: 'infrastructure-alerts'
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 2h
+
+    # CI/CD & monitoring system alerts
+    - matchers:
+        - category = "monitoring"
+      receiver: 'critical-alerts'
+      group_wait: 15s
+      group_interval: 2m
+      repeat_interval: 30m
+
+    # Informational alerts (low priority)
+    - matchers:
+        - severity = "info"
+      receiver: 'email-info'
+      group_wait: 5m
+      group_interval: 30m
+      repeat_interval: 24h
+
+    # Watchdog — always-firing heartbeat alert
+    - matchers:
+        - alertname = "Watchdog"
+      receiver: 'null'
+      group_wait: 0s
+      group_interval: 1m
+
+# ─── Inhibition Rules ────────────────────────────────────
+inhibit_rules:
+  # If a critical alert fires, suppress warnings for the same service
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ['alertname', 'cluster', 'service', 'instance']
+
+  # Suppress node-level alerts if the entire node is down
+  - source_matchers:
+      - alertname = "NodeDown"
+    target_matchers:
+      - instance =~ ".*"
+    equal: ['instance']
+
+  # Suppress container alerts if health monitor is down
+  - source_matchers:
+      - alertname = "HealthMonitorDown"
+    target_matchers:
+      - category = "availability"
+
+# ─── Receivers ───────────────────────────────────────────
+receivers:
+
+  # Null receiver (swallows alerts, used for watchdog)
+  - name: 'null'
+
+  # Critical: PagerDuty + Slack
+  - name: 'critical-alerts'
+    pagerduty_configs:
+      - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY'
+        send_resolved: true
+        description: '{{ template "pagerduty.default.description" . }}'
+        details:
+          firing: '{{ template "slack.default.text" . }}'
+          num_firing: '{{ .Alerts.Firing | len }}'
+          num_resolved: '{{ .Alerts.Resolved | len }}'
+    slack_configs:
+      - channel: '#alerts-critical'
+        send_resolved: true
+        icon_url: 'https://avatars3.githubusercontent.com/u/3380462'
+        title: '{{ template "slack.critical.title" . }}'
+        text: '{{ template "slack.critical.text" . }}'
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+        actions:
+          - type: button
+            text: 'Runbook :notebook:'
+            url: '{{ (index .Alerts 0).Annotations.runbook_url }}'
+          - type: button
+            text: 'Dashboard :grafana:'
+            url: 'http://localhost:3000'
+          - type: button
+            text: 'Silence :no_bell:'
+            url: '{{ template "__alertmanagerURL" . }}'
+
+  # Availability-specific alerts
+  - name: 'availability-alerts'
+    slack_configs:
+      - channel: '#alerts-availability'
+        send_resolved: true
+        icon_emoji: ':red_circle:'
+        title: '🔴 CONTAINER DOWN: {{ template "slack.default.title" . }}'
+        text: '{{ template "slack.default.text" . }}'
+        color: 'danger'
+    email_configs:
+      - to: 'oncall@monitoring.local'
+        send_resolved: true
+        headers:
+          Subject: '[CRITICAL] Container Availability Alert: {{ .GroupLabels.alertname }}'
+        html: '{{ template "email.default.html" . }}'
+
+  # Performance alerts
+  - name: 'performance-alerts'
+    slack_configs:
+      - channel: '#alerts-performance'
+        send_resolved: true
+        icon_emoji: ':warning:'
+        title: '⚠️ PERFORMANCE: {{ template "slack.default.title" . }}'
+        text: '{{ template "slack.default.text" . }}'
+        color: 'warning'
+
+  # Infrastructure (Kafka, ELK) alerts
+  - name: 'infrastructure-alerts'
+    slack_configs:
+      - channel: '#alerts-infrastructure'
+        send_resolved: true
+        icon_emoji: ':gear:'
+        title: '⚙️ INFRASTRUCTURE: {{ template "slack.default.title" . }}'
+        text: '{{ template "slack.default.text" . }}'
+        color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+
+  # Default Slack channel
+  - name: 'slack-default'
+    slack_configs:
+      - channel: '#alerts'
+        send_resolved: true
+        title: '{{ template "slack.default.title" . }}'
+        text: '{{ template "slack.default.text" . }}'
+        color: '{{ if eq .Status "firing" }}{{ if eq (index .Alerts 0).Labels.severity "critical" }}danger{{ else }}warning{{ end }}{{ else }}good{{ end }}'
+
+  # Email for informational alerts
+  - name: 'email-info'
+    email_configs:
+      - to: 'team@monitoring.local'
+        send_resolved: false
+        headers:
+          Subject: '[INFO] {{ .GroupLabels.alertname }}'
+        html: '{{ template "email.default.html" . }}'

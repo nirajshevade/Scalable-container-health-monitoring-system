@@ -1,0 +1,125 @@
+{{ define "__alertmanagerURL" }}{{ .ExternalURL }}/#/alerts?receiver={{ .Receiver | urlquery }}{{ end }}
+
+{{ define "__subject" }}[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .GroupLabels.SortedPairs.Values | join " " }} {{ if gt (len .CommonLabels) (len .GroupLabels) }}({{ with .CommonLabels.Remove .GroupLabels.Names }}{{ .Values | join " " }}{{ end }}){{ end }}{{ end }}
+
+{{ define "__description" }}{{ range .Alerts }}
+  Labels:
+  {{ range .Labels.SortedPairs }}  - {{ .Name }} = {{ .Value }}
+  {{ end }}
+  Annotations:
+  {{ range .Annotations.SortedPairs }}  - {{ .Name }} = {{ .Value }}
+  {{ end }}
+  Source: {{ .GeneratorURL }}
+{{ end }}{{ end }}
+
+{{ define "slack.default.title" }}{{ template "__subject" . }}{{ end }}
+{{ define "slack.default.username" }}Prometheus Alertmanager{{ end }}
+{{ define "slack.default.fallback" }}{{ template "slack.default.title" . }} | {{ template "slack.default.titlelink" . }}{{ end }}
+{{ define "slack.default.pretext" }}{{ end }}
+{{ define "slack.default.iconemoji" }}{{ end }}
+{{ define "slack.default.iconurl" }}{{ end }}
+{{ define "slack.default.titlelink" }}{{ template "__alertmanagerURL" . }}{{ end }}
+{{ define "slack.default.color" }}{{ if eq .Status "firing" }}{{ if eq (index .Alerts 0).Labels.severity "critical" }}danger{{ else }}warning{{ end }}{{ else }}good{{ end }}{{ end }}
+
+{{ define "slack.default.text" }}
+*Environment:* {{ with index .CommonLabels "cluster" }}{{ . }}{{ else }}unknown{{ end }} / {{ with index .CommonLabels "environment" }}{{ . }}{{ else }}production{{ end }}
+
+{{ if gt (len .Alerts.Firing) 0 -}}
+*🔥 Firing Alerts [{{ .Alerts.Firing | len }}]:*
+{{ range .Alerts.Firing -}}
+• *{{ .Labels.alertname }}*{{ if .Labels.container_name }} — Container: `{{ .Labels.container_name }}`{{ end }}{{ if .Labels.instance }} — Instance: `{{ .Labels.instance }}`{{ end }}
+  {{ if .Annotations.description }}{{ .Annotations.description }}{{ else }}{{ .Annotations.summary }}{{ end }}
+  _Started: {{ .StartsAt | since }} ago_
+{{ end }}
+{{- end }}
+{{ if gt (len .Alerts.Resolved) 0 -}}
+*✅ Resolved Alerts [{{ .Alerts.Resolved | len }}]:*
+{{ range .Alerts.Resolved -}}
+• *{{ .Labels.alertname }}*{{ if .Labels.container_name }} — Container: `{{ .Labels.container_name }}`{{ end }}
+  _Duration: {{ .StartsAt | since }}_
+{{ end }}
+{{- end }}
+{{ end }}
+
+{{ define "slack.critical.title" }}🚨 CRITICAL: {{ template "__subject" . }}{{ end }}
+{{ define "slack.critical.text" }}
+{{ template "slack.default.text" . }}
+*Immediate action required!*
+{{ end }}
+
+{{ define "pagerduty.default.description" }}{{ template "__subject" . }}{{ end }}
+{{ define "pagerduty.default.client" }}Prometheus Alertmanager{{ end }}
+{{ define "pagerduty.default.clienturl" }}{{ template "__alertmanagerURL" . }}{{ end }}
+{{ define "pagerduty.default.instances" }}{{ template "__description" . }}{{ end }}
+
+{{ define "email.default.subject" }}{{ template "__subject" . }}{{ end }}
+{{ define "email.default.html" }}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
+    .container { max-width: 800px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .header { padding: 20px; color: white; }
+    .header.firing { background-color: #e53e3e; }
+    .header.resolved { background-color: #38a169; }
+    .header h1 { margin: 0; font-size: 18px; }
+    .content { padding: 20px; }
+    .alert-box { border: 1px solid #e2e8f0; border-radius: 4px; padding: 15px; margin-bottom: 15px; }
+    .alert-box.critical { border-left: 4px solid #e53e3e; }
+    .alert-box.warning { border-left: 4px solid #ed8936; }
+    .alert-box.info { border-left: 4px solid #4299e1; }
+    .label { display: inline-block; background: #edf2f7; padding: 2px 8px; border-radius: 3px; font-size: 12px; margin: 2px; }
+    .footer { background: #f7fafc; padding: 15px; text-align: center; font-size: 12px; color: #718096; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e2e8f0; }
+    th { background-color: #f7fafc; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header {{ .Status }}">
+      <h1>{{ if eq .Status "firing" }}🔥 Alert Firing{{ else }}✅ Alert Resolved{{ end }}: {{ .GroupLabels.alertname }}</h1>
+      <p>Environment: {{ with index .CommonLabels "cluster" }}{{ . }}{{ else }}Production{{ end }} | Time: {{ with .CommonAnnotations.datetime }}{{ . }}{{ else }}Now{{ end }}</p>
+    </div>
+    <div class="content">
+      {{ if gt (len .Alerts.Firing) 0 }}
+      <h2>Firing Alerts ({{ .Alerts.Firing | len }})</h2>
+      {{ range .Alerts.Firing }}
+      <div class="alert-box {{ .Labels.severity }}">
+        <h3>{{ .Labels.alertname }}</h3>
+        <p><strong>Summary:</strong> {{ .Annotations.summary }}</p>
+        <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+        <p><strong>Severity:</strong> <span class="label">{{ .Labels.severity }}</span></p>
+        <p><strong>Started:</strong> {{ .StartsAt }}</p>
+        <h4>Labels:</h4>
+        <table>
+          <tr><th>Key</th><th>Value</th></tr>
+          {{ range .Labels.SortedPairs }}
+          <tr><td>{{ .Name }}</td><td>{{ .Value }}</td></tr>
+          {{ end }}
+        </table>
+        {{ if .Annotations.runbook_url }}<p><a href="{{ .Annotations.runbook_url }}">📖 View Runbook</a></p>{{ end }}
+      </div>
+      {{ end }}
+      {{ end }}
+
+      {{ if gt (len .Alerts.Resolved) 0 }}
+      <h2>Resolved Alerts ({{ .Alerts.Resolved | len }})</h2>
+      {{ range .Alerts.Resolved }}
+      <div class="alert-box" style="border-left: 4px solid #38a169;">
+        <h3>✅ {{ .Labels.alertname }}</h3>
+        <p><strong>Summary:</strong> {{ .Annotations.summary }}</p>
+        <p><strong>Duration:</strong> {{ .StartsAt }} → {{ .EndsAt }}</p>
+      </div>
+      {{ end }}
+      {{ end }}
+    </div>
+    <div class="footer">
+      <p>Sent by Prometheus Alertmanager | <a href="{{ template "__alertmanagerURL" . }}">View in Alertmanager</a> | <a href="http://localhost:3000">Open Grafana</a></p>
+    </div>
+  </div>
+</body>
+</html>
+{{ end }}
