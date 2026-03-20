@@ -1,0 +1,744 @@
+# ============================================================
+# Scalable Container Health Monitoring & Alerting System
+# Architecture: Prometheus + Grafana + Alertmanager + Kafka
+#               + ELK Stack + Custom Health Monitor + Jenkins
+# ============================================================
+
+networks:
+  monitoring:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+  kafka-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
+  elk-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/24
+  proxy:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.23.0.0/24
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  kafka_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  zookeeper_log:
+    driver: local
+  jenkins_data:
+    driver: local
+  nginx_certs:
+    driver: local
+
+services:
+
+  # ─────────────────────────────────────────────────────────
+  # PROMETHEUS — Metrics Collection & Time-Series Storage
+  # ─────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: prometheus
+    hostname: prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=10GB'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--log.level=info'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    labels:
+      - "com.monitoring.service=prometheus"
+      - "com.monitoring.tier=observability"
+
+  # ─────────────────────────────────────────────────────────
+  # ALERTMANAGER — Alert Routing & Notifications
+  # ─────────────────────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: alertmanager
+    hostname: alertmanager
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+      - '--cluster.listen-address=0.0.0.0:9094'
+      - '--log.level=info'
+    volumes:
+      - ./alertmanager/config.yml:/etc/alertmanager/config.yml:ro
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    networks:
+      - monitoring
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    labels:
+      - "com.monitoring.service=alertmanager"
+      - "com.monitoring.tier=observability"
+
+  # ─────────────────────────────────────────────────────────
+  # GRAFANA — Interactive Dashboards & Visualization
+  # ─────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: grafana
+    hostname: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-Admin@Secure123}
+      - GF_SECURITY_SECRET_KEY=${GRAFANA_SECRET_KEY:-SW2YcwTIb9zpOOhoPsMm}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_USERS_DEFAULT_THEME=dark
+      - GF_SERVER_ROOT_URL=http://localhost:${GRAFANA_PORT:-3000}
+      - GF_SMTP_ENABLED=${SMTP_ENABLED:-false}
+      - GF_SMTP_HOST=${SMTP_HOST:-smtp.gmail.com:587}
+      - GF_SMTP_USER=${SMTP_USER:-}
+      - GF_SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - GF_SMTP_FROM_ADDRESS=${SMTP_FROM:-alerts@monitoring.local}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource,grafana-piechart-panel
+      - GF_FEATURE_TOGGLES_ENABLE=publicDashboards
+      - GF_LOG_LEVEL=info
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks:
+      - monitoring
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.2'
+          memory: 128M
+    labels:
+      - "com.monitoring.service=grafana"
+      - "com.monitoring.tier=visualization"
+
+  # ─────────────────────────────────────────────────────────
+  # cADVISOR — Container Resource Usage Metrics Exporter
+  # ─────────────────────────────────────────────────────────
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: cadvisor
+    hostname: cadvisor
+    restart: unless-stopped
+    privileged: true
+    command:
+      - '--enable_metrics=cpu,cpuLoad,disk,diskIO,memory,network,oom_event,process'
+      - '--docker_only=true'
+      - '--store_container_labels=true'
+      - '--whitelisted_container_labels=com.monitoring.service,com.monitoring.tier'
+      - '--housekeeping_interval=10s'
+      - '--max_housekeeping_interval=15s'
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /cgroup:/cgroup:ro
+    ports:
+      - "${CADVISOR_PORT:-8080}:8080"
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    labels:
+      - "com.monitoring.service=cadvisor"
+      - "com.monitoring.tier=exporter"
+
+  # ─────────────────────────────────────────────────────────
+  # NODE EXPORTER — Host System Metrics Exporter
+  # ─────────────────────────────────────────────────────────
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: node-exporter
+    hostname: node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.rootfs=/host'
+      - '--path.sysfs=/host/sys'
+      - '--path.procfs=/host/proc'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--no-collector.ipvs'
+      - '--collector.cpu'
+      - '--collector.meminfo'
+      - '--collector.diskstats'
+      - '--collector.netstat'
+      - '--collector.loadavg'
+      - '--collector.uname'
+      - '--web.listen-address=:9100'
+    network_mode: host
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
+    labels:
+      - "com.monitoring.service=node-exporter"
+      - "com.monitoring.tier=exporter"
+
+  # ─────────────────────────────────────────────────────────
+  # ZOOKEEPER — Kafka Cluster Coordinator
+  # ─────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.3
+    container_name: zookeeper
+    hostname: zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_MAX_CLIENT_CNXNS: 60
+      ZOOKEEPER_AUTOPURGE_SNAP_RETAIN_COUNT: 3
+      ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL: 1
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    ports:
+      - "${ZOOKEEPER_PORT:-2181}:2181"
+    networks:
+      - kafka-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/commands/ruok | grep -q 'null'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.monitoring.service=zookeeper"
+      - "com.monitoring.tier=streaming"
+
+  # ─────────────────────────────────────────────────────────
+  # KAFKA — Message Streaming Layer
+  # ─────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.5.3
+    container_name: kafka
+    hostname: kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
+      KAFKA_LOG_SEGMENT_BYTES: 134217728
+      KAFKA_LOG_CLEANUP_POLICY: 'delete'
+      KAFKA_COMPRESSION_TYPE: 'producer'
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9999
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_HEAP_OPTS: '-Xmx1G -Xms512M'
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+      - "29092:29092"
+      - "9999:9999"
+    networks:
+      - kafka-net
+      - elk-net
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    labels:
+      - "com.monitoring.service=kafka"
+      - "com.monitoring.tier=streaming"
+
+  # ─────────────────────────────────────────────────────────
+  # KAFKA TOPIC INITIALIZER — Creates Required Topics
+  # ─────────────────────────────────────────────────────────
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.3
+    container_name: kafka-init
+    hostname: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-net
+    volumes:
+      - ./kafka/scripts/create-topics.sh:/create-topics.sh:ro
+    command: ["bash", "/create-topics.sh"]
+    restart: on-failure
+    labels:
+      - "com.monitoring.service=kafka-init"
+      - "com.monitoring.tier=streaming"
+
+  # ─────────────────────────────────────────────────────────
+  # KAFKA UI — Web-Based Kafka Management Interface
+  # ─────────────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.1
+    container_name: kafka-ui
+    hostname: kafka-ui
+    restart: unless-stopped
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      KAFKA_CLUSTERS_0_JMXPORT: 9999
+      AUTH_TYPE: LOGIN_FORM
+      SPRING_SECURITY_USER_NAME: ${KAFKA_UI_USER:-admin}
+      SPRING_SECURITY_USER_PASSWORD: ${KAFKA_UI_PASSWORD:-Admin@Kafka123}
+    ports:
+      - "${KAFKA_UI_PORT:-8090}:8080"
+    networks:
+      - kafka-net
+      - proxy
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.monitoring.service=kafka-ui"
+      - "com.monitoring.tier=streaming"
+
+  # ─────────────────────────────────────────────────────────
+  # ELASTICSEARCH — Centralized Log Storage & Search Engine
+  # ─────────────────────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch
+    hostname: elasticsearch
+    restart: unless-stopped
+    environment:
+      - node.name=elasticsearch
+      - cluster.name=container-monitoring-cluster
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-Elastic@Secure123}
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - xpack.monitoring.collection.enabled=true
+      - indices.recovery.max_bytes_per_sec=50mb
+      - cluster.routing.allocation.disk.threshold_enabled=true
+      - cluster.routing.allocation.disk.watermark.low=85%
+      - cluster.routing.allocation.disk.watermark.high=90%
+      - cluster.routing.allocation.disk.watermark.flood_stage=95%
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+      - ./elasticsearch/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+      - "9300:9300"
+    networks:
+      - elk-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u elastic:${ELASTIC_PASSWORD:-Elastic@Secure123} http://localhost:9200/_cluster/health | grep -qv '\"status\":\"red\"'"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    labels:
+      - "com.monitoring.service=elasticsearch"
+      - "com.monitoring.tier=logging"
+
+  # ─────────────────────────────────────────────────────────
+  # LOGSTASH — Log Ingestion, Transformation & Forwarding
+  # ─────────────────────────────────────────────────────────
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: logstash
+    hostname: logstash
+    restart: unless-stopped
+    environment:
+      - LS_JAVA_OPTS=-Xmx512m -Xms256m
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-Elastic@Secure123}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - ELASTICSEARCH_HOST=elasticsearch:9200
+      - xpack.monitoring.enabled=true
+      - xpack.monitoring.elasticsearch.hosts=http://elasticsearch:9200
+      - xpack.monitoring.elasticsearch.username=elastic
+      - xpack.monitoring.elasticsearch.password=${ELASTIC_PASSWORD:-Elastic@Secure123}
+    volumes:
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+    ports:
+      - "${LOGSTASH_BEATS_PORT:-5044}:5044"
+      - "${LOGSTASH_TCP_PORT:-5000}:5000/tcp"
+      - "${LOGSTASH_UDP_PORT:-5000}:5000/udp"
+      - "9600:9600"
+    networks:
+      - elk-net
+      - kafka-net
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9600/?pretty"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.2'
+          memory: 256M
+    labels:
+      - "com.monitoring.service=logstash"
+      - "com.monitoring.tier=logging"
+
+  # ─────────────────────────────────────────────────────────
+  # KIBANA — Log Visualization & Analysis Dashboard
+  # ─────────────────────────────────────────────────────────
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: kibana
+    hostname: kibana
+    restart: unless-stopped
+    environment:
+      - SERVERNAME=kibana
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD:-Kibana@Secure123}
+      - KIBANA_ENCRYPTION_KEY=${KIBANA_ENCRYPTION_KEY:-somegeneratedsecretkey32charslong}
+      - xpack.security.enabled=true
+      - xpack.reporting.enabled=true
+      - xpack.fleet.enabled=false
+      - telemetry.enabled=false
+      - LOGGING_ROOT_LEVEL=info
+    volumes:
+      - ./kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    ports:
+      - "${KIBANA_PORT:-5601}:5601"
+    networks:
+      - elk-net
+      - proxy
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:5601/api/status | grep -q 'available'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.2'
+          memory: 256M
+    labels:
+      - "com.monitoring.service=kibana"
+      - "com.monitoring.tier=logging"
+
+  # ─────────────────────────────────────────────────────────
+  # HEALTH MONITOR — Custom Container Health Monitoring Agent
+  # ─────────────────────────────────────────────────────────
+  health-monitor:
+    build:
+      context: ./health-monitor
+      dockerfile: Dockerfile
+      args:
+        - PYTHON_VERSION=3.11
+    image: health-monitor:latest
+    container_name: health-monitor
+    hostname: health-monitor
+    restart: unless-stopped
+    environment:
+      - MONITOR_INTERVAL=${MONITOR_INTERVAL:-15}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC_HEALTH=container-health-events
+      - KAFKA_TOPIC_ALERTS=container-alert-events
+      - KAFKA_TOPIC_LOGS=container-log-events
+      - PROMETHEUS_PORT=8000
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DOCKER_SOCKET=/var/run/docker.sock
+      - CPU_ALERT_THRESHOLD=${CPU_ALERT_THRESHOLD:-85.0}
+      - MEMORY_ALERT_THRESHOLD=${MEMORY_ALERT_THRESHOLD:-90.0}
+      - RESTART_COUNT_THRESHOLD=${RESTART_COUNT_THRESHOLD:-5}
+      - ELASTICSEARCH_HOST=http://elasticsearch:9200
+      - ELASTICSEARCH_USER=elastic
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD:-Elastic@Secure123}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "${HEALTH_MONITOR_PORT:-8000}:8000"
+    networks:
+      - monitoring
+      - kafka-net
+      - elk-net
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    labels:
+      - "com.monitoring.service=health-monitor"
+      - "com.monitoring.tier=monitoring"
+
+  # ─────────────────────────────────────────────────────────
+  # NGINX — Reverse Proxy & SSL Termination
+  # ─────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: nginx
+    hostname: nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx_certs:/etc/nginx/certs
+      - ./nginx/htpasswd:/etc/nginx/.htpasswd:ro
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    networks:
+      - proxy
+      - monitoring
+      - elk-net
+    depends_on:
+      - grafana
+      - kibana
+      - kafka-ui
+      - prometheus
+      - alertmanager
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
+    labels:
+      - "com.monitoring.service=nginx"
+      - "com.monitoring.tier=proxy"
+
+  # ─────────────────────────────────────────────────────────
+  # JENKINS — CI/CD Automation Server
+  # ─────────────────────────────────────────────────────────
+  jenkins:
+    image: jenkins/jenkins:2.426.2-lts-jdk17
+    container_name: jenkins
+    hostname: jenkins
+    restart: unless-stopped
+    privileged: true
+    user: root
+    environment:
+      - JENKINS_OPTS=--prefix=/jenkins
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false -Dhudson.tasks.Shell.launcherClass=0
+    volumes:
+      - jenkins_data:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./jenkins/init.groovy.d:/usr/share/jenkins/ref/init.groovy.d:ro
+      - ./jenkins/jobs:/usr/share/jenkins/ref/jobs:ro
+    ports:
+      - "${JENKINS_PORT:-8081}:8080"
+      - "${JENKINS_AGENT_PORT:-50000}:50000"
+    networks:
+      - proxy
+      - monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/jenkins/login || exit 1"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    labels:
+      - "com.monitoring.service=jenkins"
+      - "com.monitoring.tier=cicd"
