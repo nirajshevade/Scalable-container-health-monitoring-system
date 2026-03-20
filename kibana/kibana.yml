@@ -1,0 +1,49 @@
+# ============================================================
+# Kibana Configuration
+# ============================================================
+
+server.name: kibana
+server.host: "0.0.0.0"
+server.port: 5601
+server.publicBaseUrl: "http://localhost:5601"
+
+# ─── Elasticsearch Connection ─────────────────────────────
+elasticsearch.hosts: ["http://elasticsearch:9200"]
+elasticsearch.username: "kibana_system"
+elasticsearch.password: "${ELASTICSEARCH_PASSWORD}"
+elasticsearch.requestTimeout: 30000
+elasticsearch.shardTimeout: 30000
+elasticsearch.requestHeadersWhitelist: ["securitytenant"]
+
+# ─── Security ─────────────────────────────────────────────
+xpack.security.enabled: true
+xpack.security.encryptionKey: "${KIBANA_ENCRYPTION_KEY}"
+xpack.encryptedSavedObjects.encryptionKey: "${KIBANA_ENCRYPTION_KEY}"
+xpack.reporting.encryptionKey: "${KIBANA_ENCRYPTION_KEY}"
+
+# ─── Features ────────────────────────────────────────────
+xpack.reporting.enabled: true
+xpack.fleet.enabled: false
+xpack.apm.enabled: false
+
+# ─── Logging ─────────────────────────────────────────────
+logging.root.level: info
+logging.appenders:
+  default:
+    type: console
+    layout:
+      type: json
+
+# ─── Telemetry ───────────────────────────────────────────
+telemetry.enabled: false
+telemetry.optIn: false
+
+# ─── Saved Objects ───────────────────────────────────────
+savedObjects.maxImportPayloadBytes: 26214400
+
+# ─── Maps ────────────────────────────────────────────────
+map.includeElasticMapsService: false
+
+# ─── Monitoring ──────────────────────────────────────────
+monitoring.kibana.collection.enabled: true
+monitoring.ui.container.elasticsearch.enabled: true
