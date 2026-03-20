@@ -1,0 +1,230 @@
+# ============================================================
+# Kafka & ELK Stack Alert Rules
+# ============================================================
+
+groups:
+
+  # ─── Kafka Broker Alerts ─────────────────────────────────
+  - name: kafka.broker
+    interval: 30s
+    rules:
+
+      - alert: KafkaBrokerDown
+        expr: up{job="kafka"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: streaming
+        annotations:
+          summary: "Kafka broker is DOWN"
+          description: |
+            Kafka broker on {{ $labels.instance }} is not reachable.
+            Message streaming is disrupted. Alert events may be dropped.
+
+      - alert: KafkaUnderReplicatedPartitions
+        expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+        for: 5m
+        labels:
+          severity: warning
+          category: streaming
+        annotations:
+          summary: "Kafka has under-replicated partitions"
+          description: |
+            {{ $value }} partition(s) are under-replicated.
+            This may indicate broker failure or network partitioning.
+
+      - alert: KafkaConsumerGroupLag
+        expr: kafka_consumergroup_lag > 10000
+        for: 5m
+        labels:
+          severity: warning
+          category: streaming
+        annotations:
+          summary: "Kafka consumer group {{ $labels.consumergroup }} is lagging"
+          description: |
+            Consumer group {{ $labels.consumergroup }} on topic {{ $labels.topic }}
+            has a lag of {{ $value }} messages.
+            Consumers are not keeping up with message production rate.
+
+      - alert: KafkaConsumerGroupLagCritical
+        expr: kafka_consumergroup_lag > 100000
+        for: 5m
+        labels:
+          severity: critical
+          category: streaming
+        annotations:
+          summary: "Critical Kafka lag for consumer group {{ $labels.consumergroup }}"
+          description: |
+            Consumer group {{ $labels.consumergroup }} lag is {{ $value }} messages.
+            Critical backlog detected. Health events may be processed with severe delay.
+
+      - alert: KafkaOfflinePartition
+        expr: kafka_controller_kafkacontroller_offlinepartitionscount > 0
+        for: 0m
+        labels:
+          severity: critical
+          category: streaming
+        annotations:
+          summary: "Kafka has offline partitions"
+          description: |
+            {{ $value }} partition(s) are offline (have no leader).
+            These partitions cannot serve reads or writes.
+
+      - alert: KafkaActiveControllerCount
+        expr: kafka_controller_kafkacontroller_activecontrollercount != 1
+        for: 1m
+        labels:
+          severity: critical
+          category: streaming
+        annotations:
+          summary: "Kafka active controller count is not 1"
+          description: |
+            Active controller count is {{ $value }}.
+            Expected exactly 1 active controller. The cluster may be misconfigured.
+
+  # ─── Zookeeper Alerts ────────────────────────────────────
+  - name: zookeeper
+    interval: 30s
+    rules:
+
+      - alert: ZookeeperDown
+        expr: up{job="zookeeper"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: streaming
+        annotations:
+          summary: "Zookeeper is DOWN"
+          description: |
+            Zookeeper instance {{ $labels.instance }} is not reachable.
+            Kafka cluster is at risk without Zookeeper coordination.
+
+      - alert: ZookeeperHighLatency
+        expr: zookeeper_znode_count > 100000
+        for: 5m
+        labels:
+          severity: warning
+          category: streaming
+        annotations:
+          summary: "Zookeeper has high znode count"
+          description: |
+            Zookeeper has {{ $value }} znodes.
+            High znode count can increase Zookeeper memory and latency.
+
+  # ─── Elasticsearch Alerts ────────────────────────────────
+  - name: elasticsearch
+    interval: 30s
+    rules:
+
+      - alert: ElasticsearchClusterRed
+        expr: elasticsearch_cluster_health_status{color="red"} == 1
+        for: 0m
+        labels:
+          severity: critical
+          category: logging
+        annotations:
+          summary: "Elasticsearch cluster status is RED"
+          description: |
+            Elasticsearch cluster health is RED.
+            One or more primary shards are unassigned.
+            Log indexing is failing. Immediate investigation required.
+
+      - alert: ElasticsearchClusterYellow
+        expr: elasticsearch_cluster_health_status{color="yellow"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          category: logging
+        annotations:
+          summary: "Elasticsearch cluster status is YELLOW"
+          description: |
+            Elasticsearch cluster health is YELLOW.
+            One or more replica shards are unassigned.
+            Data is still available but redundancy is reduced.
+
+      - alert: ElasticsearchHeapUsageCritical
+        expr: |
+          (
+            elasticsearch_jvm_memory_used_bytes{area="heap"}
+            / elasticsearch_jvm_memory_max_bytes{area="heap"}
+          ) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          category: logging
+        annotations:
+          summary: "Elasticsearch heap usage is critical on {{ $labels.node }}"
+          description: |
+            Elasticsearch node {{ $labels.node }} heap usage is {{ printf "%.1f" $value }}%.
+            Near GC pressure limit. Risk of OutOfMemoryError and node crash.
+
+      - alert: ElasticsearchDiskLow
+        expr: |
+          elasticsearch_filesystem_data_free_bytes
+          / elasticsearch_filesystem_data_size_bytes < 0.15
+        for: 5m
+        labels:
+          severity: warning
+          category: logging
+        annotations:
+          summary: "Elasticsearch disk space low on {{ $labels.node }}"
+          description: |
+            Elasticsearch node {{ $labels.node }} has only {{ printf "%.1f" $value }}% disk free.
+            Elasticsearch may stop indexing new documents to protect data integrity.
+
+      - alert: ElasticsearchIndexingSlowdown
+        expr: |
+          rate(elasticsearch_indices_indexing_index_time_in_millis[5m])
+          / rate(elasticsearch_indices_indexing_index_total[5m]) > 500
+        for: 10m
+        labels:
+          severity: warning
+          category: logging
+        annotations:
+          summary: "Elasticsearch indexing is slow"
+          description: |
+            Average indexing latency is {{ printf "%.0f" $value }}ms.
+            Log ingestion pipeline may be backing up.
+
+      - alert: ElasticsearchUnassignedShards
+        expr: elasticsearch_cluster_health_unassigned_shards > 0
+        for: 2m
+        labels:
+          severity: warning
+          category: logging
+        annotations:
+          summary: "Elasticsearch has {{ $value }} unassigned shards"
+          description: |
+            {{ $value }} shard(s) are not assigned to any node.
+            Cluster may have availability or capacity issues.
+
+  # ─── Logstash Alerts ─────────────────────────────────────
+  - name: logstash
+    interval: 30s
+    rules:
+
+      - alert: LogstashDown
+        expr: up{job="logstash"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: logging
+        annotations:
+          summary: "Logstash is DOWN"
+          description: |
+            Logstash pipeline on {{ $labels.instance }} is not reachable.
+            Log ingestion from Kafka to Elasticsearch is disrupted.
+
+      - alert: LogstashPipelineEventsCritical
+        expr: |
+          rate(logstash_node_stats_events_in[5m]) == 0
+          and up{job="logstash"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          category: logging
+        annotations:
+          summary: "Logstash pipeline has no incoming events"
+          description: |
+            Logstash is running but receiving 0 events.
+            Check Kafka connectivity and topic configuration.

@@ -1,0 +1,33 @@
+# ============================================================
+# ELK Stack Alert Rules (Separate file for clarity)
+# ============================================================
+
+groups:
+
+  - name: elk.availability
+    interval: 30s
+    rules:
+
+      - alert: KibanaDown
+        expr: up{job="kibana"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          category: logging
+        annotations:
+          summary: "Kibana is DOWN"
+          description: |
+            Kibana on {{ $labels.instance }} is not responding.
+            Log visualization and search capabilities are unavailable.
+
+      - alert: ElasticsearchDown
+        expr: up{job="elasticsearch"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: logging
+        annotations:
+          summary: "Elasticsearch is DOWN"
+          description: |
+            Elasticsearch on {{ $labels.instance }} is not reachable.
+            All log indexing and searching is unavailable.

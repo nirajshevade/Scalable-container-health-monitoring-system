@@ -1,0 +1,128 @@
+# ============================================================
+# Prometheus Recording Rules
+# Pre-computes expensive queries for dashboard performance
+# ============================================================
+
+groups:
+
+  # ─── Container CPU Recording Rules ───────────────────────
+  - name: container.cpu.recording
+    interval: 30s
+    rules:
+
+      - record: job:container_cpu_usage:rate5m
+        expr: |
+          rate(container_cpu_usage_seconds_total{
+            name!="", name!~".*pause.*"
+          }[5m]) * 100
+
+      - record: job:container_cpu_throttle_ratio:rate5m
+        expr: |
+          rate(container_cpu_cfs_throttled_seconds_total{name!=""}[5m])
+          / rate(container_cpu_cfs_periods_total{name!=""}[5m])
+
+  # ─── Container Memory Recording Rules ────────────────────
+  - name: container.memory.recording
+    interval: 30s
+    rules:
+
+      - record: job:container_memory_usage_percent:ratio
+        expr: |
+          (
+            container_memory_usage_bytes{name!="", name!~".*pause.*"}
+            / container_spec_memory_limit_bytes{name!="", name!~".*pause.*"}
+          ) * 100
+
+      - record: job:container_memory_rss_bytes:gauge
+        expr: |
+          container_memory_rss{name!="", name!~".*pause.*"}
+
+  # ─── Container Network Recording Rules ───────────────────
+  - name: container.network.recording
+    interval: 30s
+    rules:
+
+      - record: job:container_network_rx:rate5m
+        expr: |
+          rate(container_network_receive_bytes_total{name!=""}[5m])
+
+      - record: job:container_network_tx:rate5m
+        expr: |
+          rate(container_network_transmit_bytes_total{name!=""}[5m])
+
+      - record: job:container_network_total:rate5m
+        expr: |
+          rate(container_network_receive_bytes_total{name!=""}[5m])
+          + rate(container_network_transmit_bytes_total{name!=""}[5m])
+
+  # ─── Host CPU Recording Rules ────────────────────────────
+  - name: host.cpu.recording
+    interval: 30s
+    rules:
+
+      - record: job:node_cpu_usage:avg5m
+        expr: |
+          (
+            1 - avg by(instance) (
+              rate(node_cpu_seconds_total{mode="idle"}[5m])
+            )
+          ) * 100
+
+      - record: job:node_cpu_iowait:avg5m
+        expr: |
+          avg by(instance) (
+            rate(node_cpu_seconds_total{mode="iowait"}[5m])
+          ) * 100
+
+  # ─── Host Memory Recording Rules ─────────────────────────
+  - name: host.memory.recording
+    interval: 30s
+    rules:
+
+      - record: job:node_memory_usage_percent:ratio
+        expr: |
+          (
+            1 - (
+              node_memory_MemAvailable_bytes
+              / node_memory_MemTotal_bytes
+            )
+          ) * 100
+
+      - record: job:node_memory_available_bytes:gauge
+        expr: node_memory_MemAvailable_bytes
+
+  # ─── Host Disk Recording Rules ───────────────────────────
+  - name: host.disk.recording
+    interval: 60s
+    rules:
+
+      - record: job:node_disk_usage_percent:ratio
+        expr: |
+          (
+            1 - (
+              node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"}
+              / node_filesystem_size_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"}
+            )
+          ) * 100
+
+      - record: job:node_disk_read_rate:rate5m
+        expr: |
+          rate(node_disk_read_bytes_total[5m])
+
+      - record: job:node_disk_write_rate:rate5m
+        expr: |
+          rate(node_disk_written_bytes_total[5m])
+
+  # ─── Container Count Recording Rules ─────────────────────
+  - name: container.count.recording
+    interval: 30s
+    rules:
+
+      - record: job:container_total_count:gauge
+        expr: count(container_last_seen{name!=""})
+
+      - record: job:container_running_count:gauge
+        expr: count(container_monitor_container_status{status="running"})
+
+      - record: job:container_unhealthy_count:gauge
+        expr: count(container_monitor_container_status{status!="running"})

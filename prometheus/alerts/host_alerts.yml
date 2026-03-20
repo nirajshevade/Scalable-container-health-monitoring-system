@@ -1,0 +1,286 @@
+# ============================================================
+# Host-Level Alert Rules (Node Exporter)
+# Covers: CPU, Memory, Disk, Load Average, File Descriptors
+# ============================================================
+
+groups:
+
+  # ─── Host CPU ────────────────────────────────────────────
+  - name: host.cpu
+    interval: 30s
+    rules:
+
+      - alert: HostHighCPULoad
+        expr: |
+          (
+            1 - avg by(instance) (
+              rate(node_cpu_seconds_total{mode="idle"}[5m])
+            )
+          ) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High CPU load on host {{ $labels.instance }}"
+          description: |
+            Host CPU load is {{ printf "%.1f" $value }}%.
+            Threshold: 80%
+            Sustained high CPU may impact all containers on this host.
+
+      - alert: HostCPUSaturation
+        expr: |
+          (
+            1 - avg by(instance) (
+              rate(node_cpu_seconds_total{mode="idle"}[5m])
+            )
+          ) * 100 > 95
+        for: 3m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "CPU saturation on host {{ $labels.instance }}"
+          description: |
+            Host CPU is {{ printf "%.1f" $value }}% utilized.
+            This is critically high; all containers on this host are at risk.
+
+      - alert: HostHighLoadAverage
+        expr: |
+          node_load15 / count by(instance) (
+            node_cpu_seconds_total{mode="idle"}
+          ) > 1.5
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High load average on host {{ $labels.instance }}"
+          description: |
+            Host normalized 15-minute load average is {{ printf "%.2f" $value }}.
+            This indicates the system is overloaded relative to CPU count.
+
+      - alert: HostIowaitHigh
+        expr: |
+          avg by(instance) (
+            rate(node_cpu_seconds_total{mode="iowait"}[5m])
+          ) * 100 > 20
+        for: 5m
+        labels:
+          severity: warning
+          category: disk
+        annotations:
+          summary: "High I/O wait on host {{ $labels.instance }}"
+          description: |
+            Host I/O wait is {{ printf "%.1f" $value }}%.
+            High iowait indicates storage bottleneck affecting container performance.
+
+  # ─── Host Memory ─────────────────────────────────────────
+  - name: host.memory
+    interval: 30s
+    rules:
+
+      - alert: HostHighMemoryUsage
+        expr: |
+          (
+            1 - (
+              node_memory_MemAvailable_bytes
+              / node_memory_MemTotal_bytes
+            )
+          ) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High memory usage on host {{ $labels.instance }}"
+          description: |
+            Host memory usage is {{ printf "%.1f" $value }}%.
+            Available: {{ humanize $value }} bytes.
+            Threshold: 85%
+
+      - alert: HostMemoryCritical
+        expr: |
+          (
+            1 - (
+              node_memory_MemAvailable_bytes
+              / node_memory_MemTotal_bytes
+            )
+          ) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "Critical memory usage on host {{ $labels.instance }}"
+          description: |
+            Host memory is {{ printf "%.1f" $value }}% used.
+            System is at risk of OOM kills. Immediate action required.
+
+      - alert: HostSwapUsageHigh
+        expr: |
+          (
+            1 - (
+              node_memory_SwapFree_bytes
+              / node_memory_SwapTotal_bytes
+            )
+          ) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High swap usage on host {{ $labels.instance }}"
+          description: |
+            Host swap usage is {{ printf "%.1f" $value }}%.
+            High swap usage causes severe performance degradation.
+
+  # ─── Host Disk ───────────────────────────────────────────
+  - name: host.disk
+    interval: 60s
+    rules:
+
+      - alert: HostDiskSpaceLow
+        expr: |
+          (
+            1 - (
+              node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"}
+              / node_filesystem_size_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"}
+            )
+          ) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: disk
+        annotations:
+          summary: "Disk space low on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+          description: |
+            Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is {{ printf "%.1f" $value }}% full.
+            Free space: {{ humanize $value }} bytes.
+            Threshold: 80%
+
+      - alert: HostDiskSpaceCritical
+        expr: |
+          (
+            1 - (
+              node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"}
+              / node_filesystem_size_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"}
+            )
+          ) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          category: disk
+        annotations:
+          summary: "Disk space critically low on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+          description: |
+            Filesystem {{ $labels.mountpoint }} is {{ printf "%.1f" $value }}% full.
+            Container writes may fail. Immediate cleanup or expansion required.
+
+      - alert: HostDiskWillFillIn4Hours
+        expr: |
+          predict_linear(
+            node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"}[1h],
+            4 * 3600
+          ) < 0
+        for: 5m
+        labels:
+          severity: critical
+          category: disk
+        annotations:
+          summary: "Disk predicted to fill in 4h on {{ $labels.instance }}"
+          description: |
+            Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is projected
+            to fill up within 4 hours based on current growth rate.
+            Investigate log growth, data imports, or runaway writes immediately.
+
+      - alert: HostDiskIOSaturation
+        expr: |
+          rate(node_disk_io_time_seconds_total[5m]) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+          category: disk
+        annotations:
+          summary: "Disk I/O saturation on {{ $labels.instance }}"
+          description: |
+            Disk {{ $labels.device }} on {{ $labels.instance }} is {{ printf "%.1f" $value }}% saturated.
+            High disk I/O impacts all containers using this storage.
+
+  # ─── Host Network ────────────────────────────────────────
+  - name: host.network
+    interval: 30s
+    rules:
+
+      - alert: HostNetworkInterfaceErrors
+        expr: |
+          rate(node_network_receive_errs_total[5m]) > 0
+          or rate(node_network_transmit_errs_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "Network errors on {{ $labels.instance }} ({{ $labels.device }})"
+          description: |
+            Interface {{ $labels.device }} on {{ $labels.instance }} is experiencing
+            {{ $value }} network errors per second.
+
+      - alert: HostNetworkBandwidthHigh
+        expr: |
+          (
+            rate(node_network_receive_bytes_total{device!~"lo|docker.*|veth.*|br.+|tunl.+|cali.+"}[5m])
+            + rate(node_network_transmit_bytes_total{device!~"lo|docker.*|veth.*|br.+|tunl.+|cali.+"}[5m])
+          ) > 838860800
+        for: 5m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "High network bandwidth on {{ $labels.instance }}"
+          description: |
+            Network bandwidth on {{ $labels.device }} is {{ humanize $value }} bytes/sec.
+            Threshold: 800MB/s. Network may be approaching saturation.
+
+  # ─── File Descriptors & System ───────────────────────────
+  - name: host.system
+    interval: 60s
+    rules:
+
+      - alert: HostFileDescriptorsNearLimit
+        expr: |
+          node_filefd_allocated / node_filefd_maximum > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "File descriptor usage near limit on {{ $labels.instance }}"
+          description: |
+            Host {{ $labels.instance }} is using {{ printf "%.1f" $value }}% of available file descriptors.
+            Near-limit fd usage can cause container connection failures.
+
+      - alert: HostClockSkewDetected
+        expr: |
+          abs(node_timex_offset_seconds) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          category: system
+        annotations:
+          summary: "Clock skew detected on {{ $labels.instance }}"
+          description: |
+            Host clock offset is {{ printf "%.3f" $value }} seconds.
+            Clock skew can cause issues with distributed systems and log correlation.
+
+      - alert: HostRebootRequired
+        expr: node_reboot_required > 0
+        for: 0m
+        labels:
+          severity: info
+          category: maintenance
+        annotations:
+          summary: "Host {{ $labels.instance }} requires reboot"
+          description: |
+            Host {{ $labels.instance }} has pending kernel updates that require a reboot.
+            Schedule maintenance window for reboot.

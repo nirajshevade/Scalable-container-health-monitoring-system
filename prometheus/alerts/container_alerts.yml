@@ -1,0 +1,292 @@
+# ============================================================
+# Container Health Alert Rules
+# Covers: Container state, CPU, Memory, Network, Restarts
+# ============================================================
+
+groups:
+
+  # ─── Container Availability ──────────────────────────────
+  - name: container.availability
+    interval: 30s
+    rules:
+
+      - alert: ContainerDown
+        expr: |
+          absent(container_last_seen{name!=""}) == 1
+          or (time() - container_last_seen{name!=""}) > 60
+        for: 2m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Container {{ $labels.name }} is down"
+          description: |
+            Container {{ $labels.name }} on instance {{ $labels.instance }}
+            has not been seen for more than 60 seconds.
+            This indicates the container has crashed or been forcefully stopped.
+          runbook_url: "https://wiki.internal/runbooks/container-down"
+          dashboard_url: "http://grafana:3000/d/container-health"
+
+      - alert: ContainerOOMKilled
+        expr: |
+          (kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1)
+          or increase(container_oom_events_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Container {{ $labels.name }} was OOM killed"
+          description: |
+            Container {{ $labels.name }} was killed due to out-of-memory (OOM).
+            Current memory usage exceeded the container's memory limit.
+            Consider increasing the memory limit or fixing a memory leak.
+
+      - alert: ContainerNotHealthy
+        expr: container_health_status{status!="healthy"} == 1
+        for: 1m
+        labels:
+          severity: warning
+          category: availability
+        annotations:
+          summary: "Container {{ $labels.name }} health check failing"
+          description: |
+            Container {{ $labels.name }} is reporting an unhealthy status.
+            Health status: {{ $labels.status }}
+            The container's built-in health check is failing.
+
+      - alert: ContainerKilledUnexpectedly
+        expr: |
+          increase(container_monitor_container_restarts_total[5m]) > 0
+          and container_monitor_container_restarts_total > 5
+        for: 0m
+        labels:
+          severity: warning
+          category: availability
+        annotations:
+          summary: "Container {{ $labels.container_name }} restarting frequently"
+          description: |
+            Container {{ $labels.container_name }} has restarted {{ $value }} times.
+            Frequent restarts may indicate application crashes, misconfiguration,
+            or resource exhaustion. Investigate container logs immediately.
+
+      - alert: ContainerRestartLooping
+        expr: |
+          container_monitor_container_restarts_total > 10
+        for: 5m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Container {{ $labels.container_name }} is in a restart loop"
+          description: |
+            Container {{ $labels.container_name }} has restarted {{ $value }} times.
+            This container is in a restart loop and requires immediate attention.
+
+  # ─── CPU Utilization ─────────────────────────────────────
+  - name: container.cpu
+    interval: 30s
+    rules:
+
+      - alert: ContainerHighCPU
+        expr: |
+          (
+            rate(container_cpu_usage_seconds_total{name!="", name!~".*pause.*"}[5m]) * 100
+          ) > 85
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High CPU usage on container {{ $labels.name }}"
+          description: |
+            Container {{ $labels.name }} CPU usage is {{ printf "%.1f" $value }}%.
+            Sustained high CPU may degrade container and host performance.
+            Threshold: 85%
+
+      - alert: ContainerCPUCritical
+        expr: |
+          (
+            rate(container_cpu_usage_seconds_total{name!="", name!~".*pause.*"}[5m]) * 100
+          ) > 95
+        for: 3m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "Critical CPU usage on container {{ $labels.name }}"
+          description: |
+            Container {{ $labels.name }} CPU usage is {{ printf "%.1f" $value }}%.
+            Critical CPU saturation detected. Container may become unresponsive.
+
+      - alert: ContainerCPUThrottled
+        expr: |
+          (
+            rate(container_cpu_cfs_throttled_seconds_total{name!=""}[5m])
+            / rate(container_cpu_cfs_periods_total{name!=""}[5m])
+          ) > 0.25
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Container {{ $labels.name }} CPU is being throttled"
+          description: |
+            Container {{ $labels.name }} is being CPU-throttled {{ printf "%.1f" $value }}% of the time.
+            Consider increasing CPU limits for this container.
+
+  # ─── Memory Utilization ──────────────────────────────────
+  - name: container.memory
+    interval: 30s
+    rules:
+
+      - alert: ContainerHighMemory
+        expr: |
+          (
+            container_memory_usage_bytes{name!="", name!~".*pause.*"}
+            / container_spec_memory_limit_bytes{name!="", name!~".*pause.*"}
+          ) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High memory usage on container {{ $labels.name }}"
+          description: |
+            Container {{ $labels.name }} memory usage is {{ printf "%.1f" $value }}% of its limit.
+            Current: {{ humanize $value }}%
+            Threshold: 85%
+
+      - alert: ContainerMemoryCritical
+        expr: |
+          (
+            container_memory_usage_bytes{name!="", name!~".*pause.*"}
+            / container_spec_memory_limit_bytes{name!="", name!~".*pause.*"}
+          ) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "Critical memory usage on container {{ $labels.name }}"
+          description: |
+            Container {{ $labels.name }} memory usage is {{ printf "%.1f" $value }}% of its limit.
+            Container is at risk of OOM termination. Immediate action required.
+
+      - alert: ContainerMemoryLeak
+        expr: |
+          deriv(container_memory_usage_bytes{name!=""}[30m]) > 1048576
+        for: 30m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Potential memory leak in container {{ $labels.name }}"
+          description: |
+            Container {{ $labels.name }} memory is growing at {{ humanize $value }} bytes/second.
+            This pattern suggests a possible memory leak. Investigate the application.
+
+  # ─── Network I/O ─────────────────────────────────────────
+  - name: container.network
+    interval: 30s
+    rules:
+
+      - alert: ContainerHighNetworkRx
+        expr: |
+          rate(container_network_receive_bytes_total{name!=""}[5m]) > 104857600
+        for: 5m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "High network RX on container {{ $labels.name }}"
+          description: |
+            Container {{ $labels.name }} is receiving {{ humanize $value }} bytes/sec.
+            This exceeds the 100MB/s threshold. Possible network saturation.
+
+      - alert: ContainerHighNetworkTx
+        expr: |
+          rate(container_network_transmit_bytes_total{name!=""}[5m]) > 104857600
+        for: 5m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "High network TX on container {{ $labels.name }}"
+          description: |
+            Container {{ $labels.name }} is transmitting {{ humanize $value }} bytes/sec.
+            This exceeds the 100MB/s threshold. Possible network saturation.
+
+      - alert: ContainerNetworkErrors
+        expr: |
+          rate(container_network_receive_errors_total{name!=""}[5m]) > 10
+          or rate(container_network_transmit_errors_total{name!=""}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "Network errors on container {{ $labels.name }}"
+          description: |
+            Container {{ $labels.name }} is experiencing {{ $value }} network errors/sec.
+            Check the network configuration and underlying host network.
+
+  # ─── Disk I/O ────────────────────────────────────────────
+  - name: container.disk
+    interval: 60s
+    rules:
+
+      - alert: ContainerHighDiskRead
+        expr: |
+          rate(container_fs_reads_bytes_total{name!=""}[5m]) > 52428800
+        for: 10m
+        labels:
+          severity: warning
+          category: disk
+        annotations:
+          summary: "High disk read on container {{ $labels.name }}"
+          description: |
+            Container {{ $labels.name }} is reading {{ humanize $value }} bytes/sec from disk.
+            Threshold: 50MB/s. Possible I/O bottleneck.
+
+      - alert: ContainerHighDiskWrite
+        expr: |
+          rate(container_fs_writes_bytes_total{name!=""}[5m]) > 52428800
+        for: 10m
+        labels:
+          severity: warning
+          category: disk
+        annotations:
+          summary: "High disk write on container {{ $labels.name }}"
+          description: |
+            Container {{ $labels.name }} is writing {{ humanize $value }} bytes/sec to disk.
+            Threshold: 50MB/s. Possible I/O bottleneck or runaway log writing.
+
+  # ─── Custom Health Monitor Alerts ────────────────────────
+  - name: health.monitor
+    interval: 30s
+    rules:
+
+      - alert: HealthMonitorDown
+        expr: up{job="health-monitor"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: monitoring
+        annotations:
+          summary: "Health Monitor service is DOWN"
+          description: |
+            The custom container health monitoring service is not reachable.
+            Monitoring coverage is degraded. This must be restored immediately.
+
+      - alert: ContainerExitedUnexpectedly
+        expr: container_monitor_container_status{status="exited"} == 1
+        for: 0m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Container {{ $labels.container_name }} exited unexpectedly"
+          description: |
+            Container {{ $labels.container_name }} has exited unexpectedly.
+            The container was expected to be running. Investigate logs immediately.

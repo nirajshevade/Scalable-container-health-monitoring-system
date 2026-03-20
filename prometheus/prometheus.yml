@@ -1,0 +1,171 @@
+# ============================================================
+# Prometheus Configuration
+# Scrapes: cAdvisor, Node Exporter, Health Monitor, Self
+# ============================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    cluster: 'container-monitoring'
+    environment: 'production'
+    region: 'local'
+
+# ─── Alertmanager Integration ────────────────────────────
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+      timeout: 10s
+      api_version: v2
+
+# ─── Rule Files ──────────────────────────────────────────
+rule_files:
+  - /etc/prometheus/alerts/container_alerts.yml
+  - /etc/prometheus/alerts/host_alerts.yml
+  - /etc/prometheus/alerts/kafka_alerts.yml
+  - /etc/prometheus/alerts/elk_alerts.yml
+  - /etc/prometheus/rules/recording_rules.yml
+
+# ─── Scrape Configurations ───────────────────────────────
+scrape_configs:
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Alertmanager metrics
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # cAdvisor — Container CPU, Memory, Network, Disk I/O
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          service: 'cadvisor'
+          tier: 'exporter'
+    metrics_path: /metrics
+    scrape_interval: 15s
+    metric_relabel_configs:
+      # Keep only relevant container metrics
+      - source_labels: [__name__]
+        regex: 'container_(cpu|memory|network|fs|tasks).*|machine_.*|cadvisor_.*'
+        action: keep
+      # Drop pause containers
+      - source_labels: [container]
+        regex: 'POD|'
+        action: drop
+
+  # Node Exporter — Host-Level Metrics
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['localhost:9100']
+        labels:
+          service: 'node-exporter'
+          tier: 'exporter'
+          instance: 'host'
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  # Custom Health Monitor — Application-Level Container Health
+  - job_name: 'health-monitor'
+    static_configs:
+      - targets: ['health-monitor:8000']
+        labels:
+          service: 'health-monitor'
+          tier: 'monitoring'
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  # Docker daemon metrics (if docker metrics-addr is configured)
+  - job_name: 'docker-daemon'
+    static_configs:
+      - targets: ['host.docker.internal:9323']
+        labels:
+          service: 'docker'
+          tier: 'infrastructure'
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Kafka JMX Exporter
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka:9999']
+        labels:
+          service: 'kafka'
+          tier: 'streaming'
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Kafka UI metrics
+  - job_name: 'kafka-ui'
+    static_configs:
+      - targets: ['kafka-ui:8080']
+        labels:
+          service: 'kafka-ui'
+          tier: 'streaming'
+    metrics_path: /actuator/prometheus
+    scrape_interval: 30s
+
+  # Elasticsearch Exporter
+  - job_name: 'elasticsearch'
+    static_configs:
+      - targets: ['elasticsearch:9200']
+        labels:
+          service: 'elasticsearch'
+          tier: 'logging'
+    metrics_path: /_prometheus/metrics
+    scrape_interval: 30s
+    basic_auth:
+      username: 'elastic'
+      password: 'Elastic@Secure123'
+
+  # Logstash metrics
+  - job_name: 'logstash'
+    static_configs:
+      - targets: ['logstash:9600']
+        labels:
+          service: 'logstash'
+          tier: 'logging'
+    metrics_path: /_node/stats
+    scrape_interval: 30s
+
+  # Nginx metrics (via nginx-prometheus-exporter if deployed)
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx:9113']
+        labels:
+          service: 'nginx'
+          tier: 'proxy'
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Grafana self-metrics
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+        labels:
+          service: 'grafana'
+          tier: 'visualization'
+    metrics_path: /metrics
+    scrape_interval: 30s
+    basic_auth:
+      username: 'admin'
+      password: 'Admin@Secure123'
+
+# ─── Remote Write (optional — for long-term storage) ─────
+# remote_write:
+#   - url: "http://remote-storage:8080/api/v1/write"
+#     queue_config:
+#       max_samples_per_send: 1000
+#       max_shards: 200
+#       capacity: 2500
