@@ -1,0 +1,61 @@
+# Environment Variables (never commit)
+.env
+
+# Docker build artifacts
+*.tar
+*.tar.gz
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+logs/
+*.log
+
+# TLS / Certificates
+nginx/certs/
+*.pem
+*.crt
+*.key
+*.p12
+
+# Jenkins secrets
+jenkins/secrets/
+jenkins/users/
+
+# Grafana / Kibana saved state
+grafana/data/
+kibana/data/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Node modules (if any)
+node_modules/
