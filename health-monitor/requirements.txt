@@ -1,0 +1,30 @@
+# ── Core ──────────────────────────────────────────────────
+docker==7.0.0
+prometheus-client==0.19.0
+confluent-kafka==2.3.0
+
+# ── HTTP Server (health endpoint) ─────────────────────────
+fastapi==0.104.1
+uvicorn[standard]==0.24.0.post1
+
+# ── HTTP Client ───────────────────────────────────────────
+httpx==0.25.2
+requests==2.31.0
+
+# ── Data Models & Validation ──────────────────────────────
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# ── Scheduling ────────────────────────────────────────────
+apscheduler==3.10.4
+
+# ── Logging & Observability ───────────────────────────────
+python-json-logger==2.0.7
+structlog==23.2.0
+
+# ── Elasticsearch Client ──────────────────────────────────
+elasticsearch==8.11.0
+
+# ── Utilities ────────────────────────────────────────────
+python-dotenv==1.0.0
+tenacity==8.2.3

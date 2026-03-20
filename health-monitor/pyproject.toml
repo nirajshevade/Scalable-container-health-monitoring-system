@@ -1,0 +1,39 @@
+[tool.pytest.ini_options]
+testpaths       = ["tests"]
+python_files    = ["test_*.py"]
+python_classes  = ["Test*"]
+python_functions = ["test_*"]
+addopts         = "-v --tb=short --strict-markers -p no:warnings"
+asyncio_mode    = "auto"
+
+[tool.pytest.ini_options.markers]
+unit        = "Fast, isolated unit tests (no I/O)"
+integration = "Tests that require running Docker or Kafka"
+slow        = "Tests expected to take >1s"
+
+[tool.coverage.run]
+source    = ["src"]
+omit      = ["tests/*", "conftest.py"]
+branch    = true
+
+[tool.coverage.report]
+show_missing  = true
+skip_covered  = false
+fail_under    = 80
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore   = ["E203", "W503"]
+exclude         = [".git", "__pycache__", ".venv", "dist", "build"]
+
+[tool.mypy]
+python_version         = "3.11"
+strict                 = false
+ignore_missing_imports = true
+disallow_untyped_defs  = true
+warn_return_any        = true
+warn_unused_ignores    = true
+
+[tool.black]
+line-length    = 100
+target-version = ["py311"]
