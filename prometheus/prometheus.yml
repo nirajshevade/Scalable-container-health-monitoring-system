@@ -20,6 +20,7 @@ alerting:
             - alertmanager:9093
       timeout: 10s
       api_version: v2
+      path_prefix: /alertmanager/
 
 # ─── Rule Files ──────────────────────────────────────────
 rule_files:
@@ -36,14 +37,14 @@ scrape_configs:
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
-    metrics_path: /metrics
+    metrics_path: /prometheus/metrics
     scrape_interval: 30s
 
   # Alertmanager metrics
   - job_name: 'alertmanager'
     static_configs:
       - targets: ['alertmanager:9093']
-    metrics_path: /metrics
+    metrics_path: /alertmanager/metrics
     scrape_interval: 30s
 
   # cAdvisor — Container CPU, Memory, Network, Disk I/O
@@ -113,7 +114,7 @@ scrape_configs:
         labels:
           service: 'kafka-ui'
           tier: 'streaming'
-    metrics_path: /actuator/prometheus
+    metrics_path: /kafka-ui/actuator/prometheus
     scrape_interval: 30s
 
   # Elasticsearch Exporter
@@ -156,7 +157,7 @@ scrape_configs:
         labels:
           service: 'grafana'
           tier: 'visualization'
-    metrics_path: /metrics
+    metrics_path: /grafana/metrics
     scrape_interval: 30s
     basic_auth:
       username: 'admin'

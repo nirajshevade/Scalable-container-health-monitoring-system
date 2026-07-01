@@ -84,17 +84,12 @@ done
 # ─── System Parameter Tuning for Elasticsearch ───────────
 echo -e "\n${YELLOW}[4/7] Configuring system parameters...${NC}"
 
-if [ "$(uname)" == "Linux" ]; then
-    CURRENT_VM_MAX=$(cat /proc/sys/vm/max_map_count 2>/dev/null || echo 0)
-    if [ "$CURRENT_VM_MAX" -lt 262144 ]; then
-        echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
-        sudo sysctl -w vm.max_map_count=262144
-        echo -e "${GREEN}✅ Set vm.max_map_count=262144 (required for Elasticsearch)${NC}"
-    else
-        echo -e "${GREEN}✅ vm.max_map_count already sufficient: ${CURRENT_VM_MAX}${NC}"
-    fi
+if docker info &>/dev/null; then
+    echo -e "   Running transient privileged container to set vm.max_map_count on host VM..."
+    docker run --rm --privileged alpine sysctl -w vm.max_map_count=262144
+    echo -e "${GREEN}✅ Set vm.max_map_count=262144 (required for Elasticsearch)${NC}"
 else
-    echo -e "${YELLOW}⚠️  Non-Linux system: vm.max_map_count must be set manually for Elasticsearch${NC}"
+    echo -e "${RED}❌ Docker is not accessible, cannot set vm.max_map_count.${NC}"
 fi
 
 # ─── Nginx htpasswd ──────────────────────────────────────

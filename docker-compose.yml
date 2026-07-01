@@ -24,7 +24,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.23.0.0/24
+        - subnet: 172.30.0.0/24
 
 volumes:
   prometheus_data:
@@ -66,6 +66,7 @@ services:
       - '--web.enable-lifecycle'
       - '--web.enable-admin-api'
       - '--log.level=info'
+      - '--web.external-url=/prometheus/'
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts:/etc/prometheus/alerts:ro
@@ -76,7 +77,7 @@ services:
     networks:
       - monitoring
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/prometheus/-/healthy"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -106,6 +107,7 @@ services:
       - '--storage.path=/alertmanager'
       - '--cluster.listen-address=0.0.0.0:9094'
       - '--log.level=info'
+      - '--web.external-url=/alertmanager/'
     volumes:
       - ./alertmanager/config.yml:/etc/alertmanager/config.yml:ro
       - ./alertmanager/templates:/etc/alertmanager/templates:ro
@@ -118,7 +120,7 @@ services:
       prometheus:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/alertmanager/-/healthy"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -149,7 +151,8 @@ services:
       - GF_SECURITY_SECRET_KEY=${GRAFANA_SECRET_KEY:-SW2YcwTIb9zpOOhoPsMm}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_USERS_DEFAULT_THEME=dark
-      - GF_SERVER_ROOT_URL=http://localhost:${GRAFANA_PORT:-3000}
+      - GF_SERVER_ROOT_URL=http://localhost/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
       - GF_SMTP_ENABLED=${SMTP_ENABLED:-false}
       - GF_SMTP_HOST=${SMTP_HOST:-smtp.gmail.com:587}
       - GF_SMTP_USER=${SMTP_USER:-}
@@ -172,7 +175,7 @@ services:
       prometheus:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/grafana/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -417,6 +420,7 @@ services:
       AUTH_TYPE: LOGIN_FORM
       SPRING_SECURITY_USER_NAME: ${KAFKA_UI_USER:-admin}
       SPRING_SECURITY_USER_PASSWORD: ${KAFKA_UI_PASSWORD:-Admin@Kafka123}
+      SERVER_SERVLET_CONTEXT_PATH: /kafka-ui
     ports:
       - "${KAFKA_UI_PORT:-8090}:8080"
     networks:
@@ -426,7 +430,7 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/kafka-ui/actuator/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -581,7 +585,7 @@ services:
       elasticsearch:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:5601/api/status | grep -q 'available'"]
+      test: ["CMD-SHELL", "curl -s http://localhost:5601/kibana/api/status | grep -q 'available'"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -610,6 +614,7 @@ services:
     image: health-monitor:latest
     container_name: health-monitor
     hostname: health-monitor
+    user: root
     restart: unless-stopped
     environment:
       - MONITOR_INTERVAL=${MONITOR_INTERVAL:-15}
@@ -669,7 +674,7 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - nginx_certs:/etc/nginx/certs
-      - ./nginx/htpasswd:/etc/nginx/.htpasswd:ro
+      - ./nginx/htpasswd/.htpasswd:/etc/nginx/.htpasswd:ro
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
       - "${NGINX_HTTPS_PORT:-443}:443"
