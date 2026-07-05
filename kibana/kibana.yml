@@ -14,8 +14,6 @@ elasticsearch.username: "kibana_system"
 elasticsearch.password: "${ELASTICSEARCH_PASSWORD}"
 elasticsearch.requestTimeout: 30000
 elasticsearch.shardTimeout: 30000
-elasticsearch.requestHeadersWhitelist: ["securitytenant"]
-
 # ─── Security ─────────────────────────────────────────────
 xpack.security.enabled: true
 xpack.security.encryptionKey: "${KIBANA_ENCRYPTION_KEY}"
