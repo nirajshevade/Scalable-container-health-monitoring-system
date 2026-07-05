@@ -29,14 +29,14 @@
 {{ range .Alerts.Firing -}}
 • *{{ .Labels.alertname }}*{{ if .Labels.container_name }} — Container: `{{ .Labels.container_name }}`{{ end }}{{ if .Labels.instance }} — Instance: `{{ .Labels.instance }}`{{ end }}
   {{ if .Annotations.description }}{{ .Annotations.description }}{{ else }}{{ .Annotations.summary }}{{ end }}
-  _Started: {{ .StartsAt | since }} ago_
+  _Started: {{ .StartsAt }}_
 {{ end }}
 {{- end }}
 {{ if gt (len .Alerts.Resolved) 0 -}}
 *✅ Resolved Alerts [{{ .Alerts.Resolved | len }}]:*
 {{ range .Alerts.Resolved -}}
 • *{{ .Labels.alertname }}*{{ if .Labels.container_name }} — Container: `{{ .Labels.container_name }}`{{ end }}
-  _Duration: {{ .StartsAt | since }}_
+  _Ended: {{ .EndsAt }}_
 {{ end }}
 {{- end }}
 {{ end }}

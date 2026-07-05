@@ -81,11 +81,11 @@ done
 # ─── HTTP Endpoints ──────────────────────────────────────
 echo ""
 echo -e "${YELLOW}HTTP Endpoint Health:${NC}"
-check "Prometheus"               "http://localhost:9090/-/healthy"
-check "Alertmanager"             "http://localhost:9093/-/healthy"
-check "Grafana API"              "http://localhost:3000/api/health"
-check "Kibana Status"            "http://localhost:5601/api/status"
-check "Kafka UI"                 "http://localhost:8090/actuator/health" 200
+check "Prometheus"               "http://localhost:9090/prometheus/-/healthy"
+check "Alertmanager"             "http://localhost:9093/alertmanager/-/healthy"
+check "Grafana API"              "http://localhost:3000/grafana/api/health"
+check "Kibana Status"            "http://localhost:5601/kibana/api/status"
+check "Kafka UI"                 "http://localhost:8090/kafka-ui/actuator/health" 200
 check "Health Monitor /health"   "http://localhost:8000/health"
 check "Health Monitor /ready"    "http://localhost:8000/ready"
 check "Health Monitor /metrics"  "http://localhost:8000/metrics"

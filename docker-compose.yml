@@ -107,7 +107,7 @@ services:
       - '--storage.path=/alertmanager'
       - '--cluster.listen-address=0.0.0.0:9094'
       - '--log.level=info'
-      - '--web.external-url=/alertmanager/'
+      - '--web.external-url=http://localhost/alertmanager/'
     volumes:
       - ./alertmanager/config.yml:/etc/alertmanager/config.yml:ro
       - ./alertmanager/templates:/etc/alertmanager/templates:ro
@@ -353,7 +353,7 @@ services:
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
       KAFKA_JMX_PORT: 9999
       KAFKA_JMX_HOSTNAME: localhost
-      KAFKA_HEAP_OPTS: '-Xmx1G -Xms512M'
+      KAFKA_HEAP_OPTS: '-Xmx512M -Xms256M'
     volumes:
       - kafka_data:/var/lib/kafka/data
     ports:
@@ -376,7 +376,7 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          memory: 2G
+          memory: 1G
         reservations:
           cpus: '0.5'
           memory: 512M
@@ -464,7 +464,7 @@ services:
       - xpack.security.http.ssl.enabled=false
       - xpack.security.transport.ssl.enabled=false
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-Elastic@Secure123}
-      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
       - xpack.monitoring.collection.enabled=true
       - indices.recovery.max_bytes_per_sec=50mb
       - cluster.routing.allocation.disk.threshold_enabled=true
@@ -496,10 +496,10 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          memory: 2G
+          memory: 1G
         reservations:
           cpus: '0.5'
-          memory: 1G
+          memory: 512M
     labels:
       - "com.monitoring.service=elasticsearch"
       - "com.monitoring.tier=logging"
@@ -513,7 +513,7 @@ services:
     hostname: logstash
     restart: unless-stopped
     environment:
-      - LS_JAVA_OPTS=-Xmx512m -Xms256m
+      - LS_JAVA_OPTS=-Xmx256m -Xms256m
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-Elastic@Secure123}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - ELASTICSEARCH_HOST=elasticsearch:9200
@@ -547,7 +547,7 @@ services:
       resources:
         limits:
           cpus: '1.0'
-          memory: 1G
+          memory: 512M
         reservations:
           cpus: '0.2'
           memory: 256M
@@ -594,7 +594,7 @@ services:
       resources:
         limits:
           cpus: '1.0'
-          memory: 1G
+          memory: 512M
         reservations:
           cpus: '0.2'
           memory: 256M
@@ -673,6 +673,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/html:/usr/share/nginx/html:ro
       - nginx_certs:/etc/nginx/certs
       - ./nginx/htpasswd/.htpasswd:/etc/nginx/.htpasswd:ro
     ports:
@@ -718,7 +719,7 @@ services:
     user: root
     environment:
       - JENKINS_OPTS=--prefix=/jenkins
-      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false -Dhudson.tasks.Shell.launcherClass=0
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false -Dhudson.tasks.Shell.launcherClass=0 -Xmx512m -Xms256m
     volumes:
       - jenkins_data:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
@@ -740,10 +741,10 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          memory: 2G
+          memory: 1G
         reservations:
           cpus: '0.5'
-          memory: 512M
+          memory: 256M
     labels:
       - "com.monitoring.service=jenkins"
       - "com.monitoring.tier=cicd"

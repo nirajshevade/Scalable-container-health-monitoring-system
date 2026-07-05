@@ -111,14 +111,14 @@ docker compose -f "$COMPOSE_FILE" up --no-deps kafka-init 2>&1 || warn "kafka-in
 # ─── Monitoring Core (Prometheus, Alertmanager) ──────────
 log "Starting monitoring core..."
 docker compose -f "$COMPOSE_FILE" up -d prometheus alertmanager cadvisor node-exporter
-wait_for_healthy "Prometheus"   "http://localhost:9090/-/healthy" 60
-wait_for_healthy "Alertmanager" "http://localhost:9093/-/healthy" 60
+wait_for_healthy "Prometheus"   "http://localhost:9090/prometheus/-/healthy" 60
+wait_for_healthy "Alertmanager" "http://localhost:9093/alertmanager/-/healthy" 60
 
 # ─── Visualisation (Grafana, Kibana) ────────────────────
 log "Starting Grafana and Kibana..."
 docker compose -f "$COMPOSE_FILE" up -d grafana logstash kibana kafka-ui
-wait_for_healthy "Grafana" "http://localhost:3000/api/health" 90
-wait_for_healthy "Kibana"  "http://localhost:5601/api/status"  90 || true
+wait_for_healthy "Grafana" "http://localhost:3000/grafana/api/health" 90
+wait_for_healthy "Kibana"  "http://localhost:5601/kibana/api/status"  90 || true
 
 # ─── Application Layer ────────────────────────────────────
 log "Starting health-monitor (replicas=${DEPLOY_SCALE})..."
