@@ -28,19 +28,24 @@ def requiredPlugins = [
     "ws-cleanup",
 ]
 
-updateCtr.updateAllSites()
+try {
+    updateCtr.updateAllSites()
 
-def pluginsToInstall = requiredPlugins.findAll { pluginId ->
-    !pluginMgr.getPlugin(pluginId)
-}
+    def pluginsToInstall = requiredPlugins.findAll { pluginId ->
+        !pluginMgr.getPlugin(pluginId)
+    }
 
-if (pluginsToInstall) {
-    logger.info("Installing plugins: ${pluginsToInstall}")
-    def installFutures = pluginsToInstall.collect { pluginId ->
-        updateCtr.getPlugin(pluginId)?.deploy(true)
-    }.findAll { it != null }
-    installFutures*.get()
-    jenkins.restart()
-} else {
-    logger.info("All required plugins already installed")
+    if (pluginsToInstall) {
+        logger.info("Installing plugins: ${pluginsToInstall}")
+        def installFutures = pluginsToInstall.collect { pluginId ->
+            updateCtr.getPlugin(pluginId)?.deploy(true)
+        }.findAll { it != null }
+        installFutures*.get()
+        jenkins.restart()
+    } else {
+        logger.info("All required plugins already installed")
+    }
+} catch (Throwable e) {
+    logger.warning("Failed to install or update plugins during startup due to network error: " + e.message)
+    logger.warning("Jenkins will continue to boot, but you may need to install plugins manually via the UI.")
 }
