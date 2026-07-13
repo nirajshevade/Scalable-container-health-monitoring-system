@@ -463,6 +463,7 @@ services:
       - xpack.security.enabled=true
       - xpack.security.http.ssl.enabled=false
       - xpack.security.transport.ssl.enabled=false
+      - xpack.ml.enabled=false
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-Elastic@Secure123}
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
       - xpack.monitoring.collection.enabled=true
