@@ -43,20 +43,20 @@ graph TD
     end
 
     cAdvisor -->|scrape| Prom
-    NodeExp  -->|scrape| Prom
-    HM       -->|scrape| Prom
-    HM       -->|events| Kafka
-    Kafka    -->|consume| LS
-    LS       -->|index|  ES
-    Kibana   -->|query|  ES
-    Prom     -->|alerts| AM
-    AM       -->|notify| SlackEmail[Slack / Email / PagerDuty]
-    Prom     -->|data|   Grafana
-    Nginx    -->|proxy|  Grafana
-    Nginx    -->|proxy|  Kibana
-    Nginx    -->|proxy|  Prom
-    ZK       -->|coord|  Kafka
-    Jenkins  -->|deploy| HM
+    NodeExp -->|scrape| Prom
+    HM -->|scrape| Prom
+    HM -->|events| Kafka
+    Kafka -->|consume| LS
+    LS -->|index| ES
+    Kibana -->|query| ES
+    Prom -->|alerts| AM
+    AM -->|notify| SlackEmail[Slack / Email / PagerDuty]
+    Prom -->|data| Grafana
+    Nginx -->|proxy| Grafana
+    Nginx -->|proxy| Kibana
+    Nginx -->|proxy| Prom
+    ZK -->|coord| Kafka
+    Jenkins -->|deploy| HM
 ```
 
 ---
